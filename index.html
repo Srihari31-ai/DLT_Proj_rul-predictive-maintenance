@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RUL Estimation using LSTM</title>
 <style>
-  :root { --navy:#122b4a; --blue:#1f6fb5; --light:#f3f7fb; --text:#222; }
+  :root { --navy:#122b4a; --blue:#1f6fb5; --light:#f3f7fb; --text:#222; --orange:#e8731a; }
   * { box-sizing: border-box; }
   body { margin:0; font-family: Calibri, Arial, sans-serif; color:var(--text); line-height:1.6; background:#fff; }
   header { background:var(--navy); color:#fff; padding:56px 20px; text-align:center; }
@@ -28,13 +28,32 @@
   .arrow { color:var(--blue); font-weight:bold; }
   footer { background:var(--navy); color:#cfe3f5; text-align:center; padding:20px; font-size:0.9rem; }
   footer a { color:#fff; }
+
+  /* live demo */
+  .controls { display:flex; flex-wrap:wrap; gap:14px; align-items:center; margin-bottom:14px; }
+  .controls label { font-weight:bold; }
+  select, button { font-size:1rem; padding:6px 12px; border-radius:6px; border:1px solid #9bb7d1; background:#fff; }
+  button { background:var(--blue); color:#fff; border:none; font-weight:bold; cursor:pointer; }
+  input[type=range] { flex:1; min-width:180px; }
+  .stats { display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-bottom:14px; }
+  @media (max-width:700px) { .stats { grid-template-columns:1fr 1fr; } }
+  .stat { background:var(--light); border-radius:8px; padding:10px 12px; text-align:center; }
+  .stat .v { font-size:1.8rem; font-weight:bold; color:var(--navy); }
+  .stat .k { font-size:0.85rem; color:#556; }
+  .bar { height:16px; background:#e3e9ef; border-radius:8px; overflow:hidden; }
+  .bar > div { height:100%; width:0; transition:width .2s, background .2s; }
+  #status { margin:10px 0; font-weight:bold; font-size:1.05rem; }
+  canvas { width:100%; height:300px; border:1px solid #dde6ee; border-radius:6px; }
+  .note { font-size:0.88rem; color:#556; margin-top:8px; }
+  #demo-error { display:none; background:#fff4e5; border-left:4px solid var(--orange); padding:12px 16px; border-radius:6px; }
 </style>
 </head>
 <body>
 
 <header>
   <h1>Predictive Maintenance and RUL Estimation<br>for Industrial Equipment using LSTM</h1>
-  <p>S Srihari &nbsp;|&nbsp; B.Tech AI &nbsp;|&nbsp; SRM IST Tiruchirappalli</p>
+  <p>Team: S Srihari, Sukant B, Sharvesh Kumar R S, Emaiyavarman G</p>
+  <p>B.Tech AI &nbsp;|&nbsp; SRM IST Tiruchirappalli</p>
   <p>Deep Learning Techniques (DLT) Project</p>
   <a class="btn" href="https://github.com/Srihari31-ai/DLT_Proj_rul-predictive-maintenance" target="_blank">View Code on GitHub</a>
 </header>
@@ -47,6 +66,35 @@
     Unexpected machine failures cause costly downtime and safety risks. Predictive maintenance uses sensor data to
     estimate the <b>Remaining Useful Life (RUL)</b> of equipment, so maintenance happens only when needed:
     not too early, not too late.
+  </div>
+</section>
+
+<section id="demo">
+  <h2>Live Demo: Predict RUL in your browser</h2>
+  <p>Pick a test engine and move the cycle slider (or press Play). The trained LSTM runs <b>right here in your browser</b>
+  on the last 30 cycles of sensor data and predicts how many cycles are left.</p>
+
+  <div id="demo-error">
+    Live demo data not found. Put <code>model_data.js</code> in the same folder as <code>index.html</code>.
+  </div>
+
+  <div id="demo-ui" style="display:none">
+    <div class="controls">
+      <label for="engine">Engine</label>
+      <select id="engine"></select>
+      <button id="play">Play</button>
+      <input type="range" id="cycle" min="30" max="100" value="100">
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="v" id="s-cycle">-</div><div class="k">Cycle</div></div>
+      <div class="stat"><div class="v" id="s-pred">-</div><div class="k">Predicted RUL (cycles)</div></div>
+      <div class="stat"><div class="v" id="s-actual">-</div><div class="k">Actual RUL (cycles)</div></div>
+      <div class="stat"><div class="v" id="s-err">-</div><div class="k">Absolute error</div></div>
+    </div>
+    <div class="bar"><div id="bar"></div></div>
+    <div id="status"></div>
+    <canvas id="chart"></canvas>
+    <div class="note" id="demo-note"></div>
   </div>
 </section>
 
@@ -107,5 +155,129 @@
   <a href="https://github.com/Srihari31-ai/DLT_Proj_rul-predictive-maintenance" target="_blank">Source code on GitHub</a>
 </footer>
 
+<script src="model_data.js" onerror="void 0"></script>
+<script>
+// ---------- LSTM inference in plain JavaScript (same maths as Keras) ----------
+const sig = x => 1 / (1 + Math.exp(-x));
+
+// K: [inputs][4*units], R: [units][4*units], b: [4*units]. Gate order: input, forget, cell, output.
+function lstm(seq, K, R, b, units, returnSeq) {
+  const inD = K.length, n4 = 4 * units;
+  let h = new Array(units).fill(0), c = new Array(units).fill(0);
+  const outs = [];
+  for (let t = 0; t < seq.length; t++) {
+    const x = seq[t], z = b.slice();
+    for (let j = 0; j < inD; j++) { const xv = x[j], row = K[j]; for (let k = 0; k < n4; k++) z[k] += xv * row[k]; }
+    for (let j = 0; j < units; j++) { const hv = h[j], row = R[j]; for (let k = 0; k < n4; k++) z[k] += hv * row[k]; }
+    const nh = new Array(units), nc = new Array(units);
+    for (let k = 0; k < units; k++) {
+      const i = sig(z[k]), f = sig(z[units + k]), g = Math.tanh(z[2 * units + k]), o = sig(z[3 * units + k]);
+      nc[k] = f * c[k] + i * g;
+      nh[k] = o * Math.tanh(nc[k]);
+    }
+    h = nh; c = nc;
+    if (returnSeq) outs.push(h);
+  }
+  return returnSeq ? outs : h;
+}
+
+function dense(x, W, b, relu) {
+  const out = b.slice();
+  for (let j = 0; j < x.length; j++) { const row = W[j]; for (let k = 0; k < out.length; k++) out[k] += x[j] * row[k]; }
+  return relu ? out.map(v => Math.max(0, v)) : out;
+}
+
+function predictRUL(win) {
+  const [K1, R1, b1, K2, R2, b2, W3, b3, W4, b4] = MODEL_DATA.w;
+  const s1 = lstm(win, K1, R1, b1, R1.length, true);
+  const h2 = lstm(s1, K2, R2, b2, R2.length, false);
+  return dense(dense(h2, W3, b3, true), W4, b4, false)[0];
+}
+
+// ---------- Demo UI ----------
+(function () {
+  if (typeof MODEL_DATA === 'undefined') { document.getElementById('demo-error').style.display = 'block'; return; }
+  document.getElementById('demo-ui').style.display = 'block';
+
+  const W = MODEL_DATA.window, CAP = MODEL_DATA.cap, engines = MODEL_DATA.engines;
+  const $ = id => document.getElementById(id);
+  const sel = $('engine'), slider = $('cycle'), playBtn = $('play');
+  engines.forEach((e, i) => { const o = document.createElement('option'); o.value = i; o.textContent = 'Engine ' + e.unit; sel.appendChild(o); });
+
+  let eng, n, preds, raw, actual, timer = null;
+
+  const clamp = v => Math.max(0, Math.min(CAP, v));
+  const actualAt = c => Math.min(CAP, eng.rul + (n - c));
+
+  function loadEngine() {
+    eng = engines[+sel.value]; n = eng.seq.length;
+    preds = {}; raw = {}; actual = [];
+    for (let c = W; c <= n; c++) { raw[c] = predictRUL(eng.seq.slice(c - W, c)); preds[c] = clamp(raw[c]); actual[c] = actualAt(c); }
+    slider.min = W; slider.max = n; slider.value = n;
+    stop(); render();
+  }
+
+  function render() {
+    const c = +slider.value, p = preds[c], a = actual[c];
+    $('s-cycle').textContent = c + ' / ' + n;
+    $('s-pred').textContent = p.toFixed(0);
+    $('s-actual').textContent = a.toFixed(0);
+    $('s-err').textContent = Math.abs(p - a).toFixed(0);
+    const pct = Math.max(0, Math.min(100, p / CAP * 100));
+    let color, msg;
+    if (p >= 70) { color = '#2e9e5b'; msg = 'Healthy: no maintenance needed yet'; }
+    else if (p >= 30) { color = '#e0a100'; msg = 'Warning: plan maintenance soon'; }
+    else { color = '#d63b3b'; msg = 'Critical: schedule maintenance now'; }
+    $('bar').style.width = pct + '%'; $('bar').style.background = color;
+    $('status').textContent = msg; $('status').style.color = color;
+    drawChart(c);
+    $('demo-note').textContent = 'Test engine ' + eng.unit + ' | browser prediction at last cycle: ' + raw[n].toFixed(2) +
+      ' | Keras prediction: ' + eng.pred.toFixed(2) + ' | LSTM RMSE over all 100 test engines: ' + MODEL_DATA.lstm_rmse.toFixed(2);
+  }
+
+  function drawChart(cur) {
+    const cv = $('chart'), dpr = window.devicePixelRatio || 1;
+    const w = cv.clientWidth, h = cv.clientHeight;
+    cv.width = w * dpr; cv.height = h * dpr;
+    const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+    const L = 64, R = 12, T = 14, B = 34, pw = w - L - R, ph = h - T - B;
+    const x = c => L + (c - W) / Math.max(1, n - W) * pw, y = v => T + (1 - v / CAP) * ph;
+    g.font = '12px Calibri, Arial'; g.fillStyle = '#556'; g.strokeStyle = '#e3e9ef'; g.lineWidth = 1;
+    for (let v = 0; v <= CAP; v += 25) { g.beginPath(); g.moveTo(L, y(v)); g.lineTo(w - R, y(v)); g.stroke(); g.textAlign = 'right'; g.fillText(v, L - 8, y(v) + 4); g.textAlign = 'left'; }
+    g.fillText('Cycle', w / 2 - 14, h - 8);
+    g.save(); g.translate(14, h / 2 + 30); g.rotate(-Math.PI / 2); g.fillText('RUL (cycles)', 0, 0); g.restore();
+    // actual
+    g.strokeStyle = '#1f6fb5'; g.lineWidth = 2.5; g.beginPath();
+    for (let c = W; c <= n; c++) { c === W ? g.moveTo(x(c), y(actual[c])) : g.lineTo(x(c), y(actual[c])); } g.stroke();
+    // predicted up to current cycle
+    g.strokeStyle = '#e8731a'; g.lineWidth = 2; g.setLineDash([6, 4]); g.beginPath();
+    for (let c = W; c <= cur; c++) { c === W ? g.moveTo(x(c), y(preds[c])) : g.lineTo(x(c), y(preds[c])); } g.stroke();
+    g.setLineDash([]);
+    // marker
+    g.strokeStyle = '#999'; g.lineWidth = 1; g.beginPath(); g.moveTo(x(cur), T); g.lineTo(x(cur), T + ph); g.stroke();
+    g.fillStyle = '#e8731a'; g.beginPath(); g.arc(x(cur), y(preds[cur]), 5, 0, 7); g.fill();
+    // legend
+    g.fillStyle = '#1f6fb5'; g.fillRect(L + 10, T + 6, 18, 3); g.fillStyle = '#222'; g.fillText('Actual RUL', L + 34, T + 11);
+    g.fillStyle = '#e8731a'; g.fillRect(L + 120, T + 6, 18, 3); g.fillStyle = '#222'; g.fillText('Predicted RUL (LSTM)', L + 144, T + 11);
+  }
+
+  function stop() { if (timer) { clearInterval(timer); timer = null; } playBtn.textContent = 'Play'; }
+  function play() {
+    if (+slider.value >= n) slider.value = W;
+    playBtn.textContent = 'Pause';
+    timer = setInterval(() => {
+      if (+slider.value >= n) { stop(); return; }
+      slider.value = +slider.value + 1; render();
+    }, 60);
+  }
+
+  sel.addEventListener('change', loadEngine);
+  slider.addEventListener('input', () => { stop(); render(); });
+  playBtn.addEventListener('click', () => timer ? stop() : play());
+  window.addEventListener('resize', render);
+  loadEngine();
+})();
+</script>
 </body>
 </html>

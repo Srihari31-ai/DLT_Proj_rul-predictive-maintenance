@@ -1,6 +1,6 @@
 # Predictive Maintenance and RUL Estimation using LSTM
 
-Deep Learning Techniques (DLT) project by **S Srihari**, B.Tech AI, SRM IST Tiruchirappalli.
+Deep Learning Techniques (DLT) project by **S Srihari**, **Sukant B**, **Sharvesh Kumar R S**, **Emaiyavarman G**, B.Tech AI, SRM IST Tiruchirappalli.
 
 Estimates the **Remaining Useful Life (RUL)** of turbofan engines from sensor data using an LSTM, and compares it with a Random Forest baseline.
 
